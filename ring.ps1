@@ -181,6 +181,7 @@ function Update-UI($data) {
         $fillBot.Data = $null
         $fillCtx.Data = $null
         Update-TipText
+        if ($tip.IsVisible) { & $positionTip }
         return
     }
     $h = if ($null -ne $data.h) { [Math]::Max(0, [Math]::Min(100, [double]$data.h)) } else { 0 }
@@ -201,6 +202,7 @@ function Update-UI($data) {
     else { $fillCtx.Stroke = "#6CB6FF" }
 
     Update-TipText
+    if ($tip.IsVisible) { & $positionTip }
 }
 
 $script:proc = $null
@@ -451,6 +453,7 @@ $script:hkHwnd = (New-Object System.Windows.Interop.WindowInteropHelper $win).En
     } else {
         $script:hotkeyActive = $true
         Enter-HoverUI
+        Start-QuotaFetch
         $hotkeyHideTimer.Stop()
         $hotkeyHideTimer.Start()
     }
