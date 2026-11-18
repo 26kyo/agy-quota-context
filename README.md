@@ -18,17 +18,20 @@ Windows 桌面悬浮小球，实时显示 Antigravity (AGY) 桌面端的：
 
 ---
 
-## 快速开始（直接复制命令）
+## 快速开始（全程用 PowerShell，不要用 CMD）
 
-在你想存放工具的文件夹里 **Shift + 右键 → 在终端中打开（或在此处打开 PowerShell 窗口）**，也可以直接按 `Win + R` 输入 `powershell` 回车后按下面任一方式执行。
+> **注意**：请先打开 **PowerShell**（按 `Win + R` 输入 `powershell` 回车，提示符开头应为 `PS `；不要用黑框 `cmd.exe`）。先 `cd` 进入你想存放工具的目录再执行拉取与检查命令。
 
-### 1. 下载项目
+### 1. 进入目标目录并下载项目
 
 **方式 A：已装 Git**
 
 ```powershell
+# 先进入存放目录（以 D:\tools 为例，也可换成你自己的目录）
 mkdir D:\tools -Force
 cd D:\tools
+
+# 拉取仓库并进入项目目录
 git clone https://github.com/26kyo/agy-quota-context.git
 cd agy-quota-context
 ```
@@ -36,8 +39,10 @@ cd agy-quota-context
 **方式 B：不会用 / 没装 Git（直接下载 ZIP）**
 
 ```powershell
+# 先进入存放目录（以 D:\tools 为例）
 mkdir D:\tools -Force
 cd D:\tools
+
 Invoke-WebRequest https://github.com/26kyo/agy-quota-context/archive/refs/heads/main.zip -OutFile agy-quota-context.zip
 Expand-Archive agy-quota-context.zip -DestinationPath . -Force
 Rename-Item agy-quota-context-main agy-quota-context
@@ -45,7 +50,9 @@ Remove-Item agy-quota-context.zip
 cd agy-quota-context
 ```
 
-### 2. 检查默认 WSL 与数据抓取（推荐先测一下）
+### 2. 在项目目录内检查 WSL 与数据抓取
+
+> 确认当前 PowerShell 路径已经在 `...\agy-quota-context>` 内再运行下面命令。
 
 ```powershell
 wsl -l -v
@@ -60,7 +67,7 @@ wsl -s Ubuntu
 保持 Antigravity 打开，测试数据是否能正常抓到：
 
 ```powershell
-wsl --cd "$PWD" -e python3 get_quota.py
+wsl -e python3 get_quota.py
 ```
 
 看到 `{"ok": true, ...}` 即表示环境正常。
@@ -70,7 +77,7 @@ wsl --cd "$PWD" -e python3 get_quota.py
 在当前 PowerShell 窗口运行（或直接双击文件夹里的 `start-ring.vbs`）：
 
 ```powershell
-wscript.exe "$PWD\start-ring.vbs"
+wscript.exe start-ring.vbs
 ```
 
 > 仅当 **Antigravity 主窗口可见且未最小化** 时悬浮球才会显示；最小化或关闭 AGY 时会自动隐藏。
