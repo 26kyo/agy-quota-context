@@ -236,8 +236,8 @@ function Start-QuotaFetch {
 }
 
 $wa = [System.Windows.SystemParameters]::WorkArea
-$win.Left = [Math]::Round(($wa.Left + $wa.Right - 44) / 2.0)
-$win.Top = [Math]::Round(($wa.Top + $wa.Bottom - 44) / 2.0)
+$win.Left = $wa.Left + 4
+$win.Top = $wa.Bottom - 60
 if (Test-Path $posFile) {
     $parts = (Get-Content $posFile -ErrorAction SilentlyContinue | Select-Object -First 1) -split ","
     if ($parts.Count -eq 2) {
@@ -255,7 +255,8 @@ $positionTip = {
     if ($tip.Left + $tip.ActualWidth -gt $wa.Right) {
         $tip.Left = $win.Left - $tip.ActualWidth
     }
-    $tip.Top = $win.Top + ($win.Height - $tip.ActualHeight) / 2.0
+    $tipTop = $win.Top + ($win.Height - $tip.ActualHeight) / 2.0
+    $tip.Top = [Math]::Max($wa.Top, [Math]::Min($wa.Bottom - $tip.ActualHeight, $tipTop))
 }
 
 $script:hotkeyActive = $false
