@@ -2,10 +2,10 @@
 """Fetch Antigravity local language_server quota and active conversation context as JSON."""
 import glob
 import json
-import os
 import re
 import ssl
 import subprocess
+import tempfile
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +14,7 @@ import context_report
 
 CATALOG_PATH = Path.home() / ".gemini" / "config" / "plugins" / "desktop-context" / "sidecars" / "context" / ".data" / "model-catalog.json"
 CONV_DIR = Path.home() / ".gemini" / "antigravity" / "conversations"
+ACTIVE_STATE_PATH = Path(tempfile.gettempdir()) / "agy_ring_active.json"
 
 
 def find_ls_target():
@@ -76,17 +77,61 @@ def fmt_tokens(n):
     return str(n)
 
 
+def parse_ts(iso_str):
+    if not iso_str:
+        return 0.0
+    s = re.sub(r"(\.\d{6})\d+", r"\1", iso_str.replace("Z", "+00:00"))
+    try:
+        return datetime.fromisoformat(s).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def pick_conversation(summaries):
+    candidates = []
+    for cid, v in summaries.items():
+        title = " ".join((v.get("summary") or "").split())
+        if not title or not (CONV_DIR / f"{cid}.db").exists():
+            continue
+        ann = v.get("annotations") or {}
+        view_ts = parse_ts(ann.get("lastUserViewTime"))
+        input_ts = parse_ts(v.get("lastUserInputTime"))
+        mod_ts = parse_ts(v.get("lastModifiedTime"))
+        focus_ts = max(view_ts, input_ts) or mod_ts
+        candidates.append((focus_ts, mod_ts, cid, title))
+    if not candidates:
+        return None, ""
+
+    top_ts = max(c[0] for c in candidates)
+    tied = sorted((c for c in candidates if abs(c[0] - top_ts) < 1e-3), key=lambda c: c[1], reverse=True)
+    chosen = tied[0]
+
+    prev = {}
+    try:
+        prev = json.loads(ACTIVE_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        pass
+
+    if len(tied) > 1 and prev.get("cid"):
+        prev_cid, prev_ts = prev["cid"], float(prev.get("ts") or 0.0)
+        if abs(top_ts - prev_ts) < 1e-3:
+            chosen = next((c for c in tied if c[2] == prev_cid), chosen)
+        else:
+            chosen = next((c for c in tied if c[2] != prev_cid), chosen)
+
+    try:
+        ACTIVE_STATE_PATH.write_text(json.dumps({"cid": chosen[2], "ts": top_ts}), encoding="utf-8")
+    except OSError:
+        pass
+    return chosen[2], chosen[3]
+
+
 def get_context_info(ports, token, ctx):
     traj = ls_post(ports, token, "GetAllCascadeTrajectories", {}, ctx)
     summaries = (traj or {}).get("trajectorySummaries") or {}
-    candidates = [
-        (v.get("lastModifiedTime", ""), cid, " ".join((v.get("summary") or "").split()))
-        for cid, v in summaries.items()
-        if (v.get("summary") or "").strip() and (CONV_DIR / f"{cid}.db").exists()
-    ]
-    if not candidates:
+    conv_id, title = pick_conversation(summaries)
+    if not conv_id:
         return None
-    _, conv_id, title = max(candidates)
     db_path = CONV_DIR / f"{conv_id}.db"
 
     steps, gen = context_report.load(db_path)
