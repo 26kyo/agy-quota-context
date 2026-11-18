@@ -6,13 +6,13 @@ import os
 import re
 import ssl
 import subprocess
-import sys
 import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-CONTEXT_DIR = str(Path.home() / ".gemini" / "config" / "plugins" / "desktop-context" / "sidecars" / "context")
-CATALOG_PATH = Path(CONTEXT_DIR) / ".data" / "model-catalog.json"
+import context_report
+
+CATALOG_PATH = Path.home() / ".gemini" / "config" / "plugins" / "desktop-context" / "sidecars" / "context" / ".data" / "model-catalog.json"
 CONV_DIR = Path.home() / ".gemini" / "antigravity" / "conversations"
 
 
@@ -88,9 +88,6 @@ def get_context_info(ports, token, ctx):
         return None
     _, conv_id, title = max(candidates)
     db_path = CONV_DIR / f"{conv_id}.db"
-
-    sys.path.insert(0, CONTEXT_DIR)
-    import context_report  # noqa: E402
 
     steps, gen = context_report.load(db_path)
     catalog_entry = {}

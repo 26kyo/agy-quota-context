@@ -14,7 +14,7 @@ Windows 桌面悬浮小球，实时显示 Antigravity (AGY) 桌面端的：
 - **Windows + WSL**：AGY 桌面端运行在 Windows，其 `language_server` 运行在 WSL 内
 - WSL 内已安装 `python3` 与 `ss`（Ubuntu 等常见发行版默认自带）
 - Windows PowerShell 5.1+（Windows 10/11 自带）
-- **如需显示内环上下文与会话名**：需安装 [antigravity-desktop-context](https://github.com/dimitr-io/antigravity-desktop-context) 插件（未安装时仅显示外环配额）
+- **无需安装任何额外 AGY 插件**，开箱即可显示三环配额、上下文占用与当前会话名
 
 ---
 
@@ -110,6 +110,10 @@ $s.Save()
 ## 原理与免责声明
 
 `get_quota.py` 扫描本机 `language_server` 进程的 `--csrf_token` 与本地端口，调用 AGY 本地**非公开**接口；仅访问 `127.0.0.1`，不上传任何数据。接口随 AGY 版本更新可能失效。非官方项目。
+
+## 致谢
+
+- 上下文数据库与 token 统计模块 `context_report.py` 来自 [antigravity-desktop-context](https://github.com/dimitr-io/antigravity-desktop-context)（MIT License, Copyright (c) 2026 Dimitrios Ioannidis）。
 
 ## License
 
