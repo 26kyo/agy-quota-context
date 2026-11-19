@@ -6,81 +6,117 @@ Windows 桌面悬浮小球，实时显示 Antigravity (AGY) 桌面端的：
 - **当前会话上下文占用**：已用 / 上限 / 百分比
 - **当前会话名称**：确认上下文计算对象正确
 - **全局热键 `Ctrl + Alt + Q`**：立即刷新并弹出详情气泡（4 秒自动收回，再按一次立即收回）
+- **纯 Windows / Windows + WSL 自动识别**：同一套脚本开箱即用，无需手动切换模式
 
 ---
 
-## 适用环境与前提
+## Agent 接入指南（For AI Agents）
 
-- **Windows + WSL**：AGY 桌面端运行在 Windows，其 `language_server` 运行在 WSL 内
-- WSL 内已安装 `python3` 与 `ss`（Ubuntu 等常见发行版默认自带）
-- Windows PowerShell 5.1+（Windows 10/11 自带）
-- **无需安装任何额外 AGY 插件**，开箱即可显示三环配额、上下文占用与当前会话名
+> 若你是替用户安装、验证或排查本工具的 Coding Agent，直接按本节顺序执行即可。
 
----
+### 1. 自动识别规则
 
-## 快速开始（全程用 PowerShell，不要用 CMD）
+`ring.ps1` 每次抓取时自动判断 `language_server` 所在环境，**无需配置文件**：
 
-> **注意**：请先打开 **PowerShell**（按 `Win + R` 输入 `powershell` 回车，提示符开头应为 `PS `；不要用黑框 `cmd.exe`）。先 `cd` 进入你想存放工具的目录再执行拉取与检查命令。
+| 检测条件（按顺序） | 命中模式 | 执行命令 | 依赖要求 |
+| :--- | :--- | :--- | :--- |
+| Windows 本机存在 `language_server*` 进程 | `windows`（纯 Windows） | 自动探测本机 `python3` → `python` → `py -3` 执行 `get_quota.py` | Windows 已装 Python 3（仅标准库，零第三方包） |
+| 本机无 `language_server*` 且系统存在 `wsl.exe` | `wsl`（Windows + WSL） | `wsl.exe --cd "<repoDir>" -e python3 get_quota.py` | 默认 WSL 发行版内已装 `python3` 与 `ss` |
+| 以上均不满足 | 无 | 界面提示 `AGY · AGY 未运行` | 启动 Antigravity 后自动恢复 |
 
-### 1. 进入目标目录并下载项目
+> 切换纯 Windows 与 WSL 工作区时会自动切模式，无需重启悬浮球；当前命中的模式会记录在同目录 `ring.log`（`fetch mode=windows|wsl`）。
 
-**方式 A：已装 Git**
+### 2. 仓库文件职责
 
-```powershell
-# 先进入存放目录（以 D:\tools 为例，也可换成你自己的目录）
-mkdir D:\tools -Force
-cd D:\tools
+| 文件 | 作用 |
+| :--- | :--- |
+| `start-ring.vbs` | 隐藏终端窗口启动 `ring.ps1` |
+| `ring.ps1` | Windows WPF 悬浮球 UI、窗口置顶跟随、`Ctrl+Alt+Q` 热键、自动选路调用 `get_quota.py` |
+| `get_quota.py` | 跨平台数据抓取器（Windows 用 CIM + `netstat`；Linux/WSL 用 `/proc` + `ss`），输出单行 JSON |
+| `context_report.py` | 只读解析 `~/.gemini/antigravity/conversations/*.db` 计算上下文 token 占用 |
+| `ring.ico` | 可选桌面快捷方式图标 |
 
-# 拉取仓库并进入项目目录
-git clone https://github.com/26kyo/agy-quota-context.git
-cd agy-quota-context
+### 3. 安装与验收步骤（PowerShell）
+
+1. 将仓库拉取到目标目录（如 `D:\tools\agy-quota-context`）：
+   ```powershell
+   git clone https://github.com/26kyo/agy-quota-context.git D:\tools\agy-quota-context
+   cd D:\tools\agy-quota-context
+   ```
+2. 确认 Antigravity 已打开，按环境验证数据抓取（**验收标准：stdout 返回 `{"ok": true, ...}`**）：
+   - **纯 Windows**：
+     ```powershell
+     python3 get_quota.py
+     # 若系统未提供 python3 别名，改用 python get_quota.py 或 py -3 get_quota.py
+     ```
+   - **Windows + WSL**：
+     ```powershell
+     wsl -l -v                     # 确认带 * 的默认发行版是运行 AGY 的发行版（必要时 wsl -s <Distro>）
+     wsl -e python3 get_quota.py
+     ```
+3. 启动悬浮球：
+   ```powershell
+   wscript.exe start-ring.vbs
+   ```
+
+### 4. `get_quota.py` JSON 输出契约
+
+成功：
+```json
+{
+  "ok": true,
+  "mode": "windows",
+  "h": 85.0,
+  "hReset": "21:30",
+  "w": 92.5,
+  "wReset": "11-24 08:00",
+  "a": null,
+  "aReset": "",
+  "ctx": 34.2,
+  "ctxUsed": "358k",
+  "ctxLimit": "1.0M",
+  "ctxTitle": "会话标题"
+}
 ```
 
-**方式 B：不会用 / 没装 Git（直接下载 ZIP）**
+失败：
+```json
+{"ok": false, "mode": "windows", "err": "AGY 未运行"}
+```
+
+| 字段 | 说明 |
+| :--- | :--- |
+| `ok` | `true` / `false` |
+| `mode` | 实际抓取环境：`windows` / `wsl` / `linux` |
+| `h` / `hReset` | 5 小时配额剩余百分比与本地重置时间 |
+| `w` / `wReset` | 每周配额剩余百分比与本地重置时间（为空时 UI 回退显示 `a` / `aReset`） |
+| `ctx` / `ctxUsed` / `ctxLimit` / `ctxTitle` | 当前活跃会话上下文百分比、已用/上限 token、会话标题（可选，读取失败不影响配额显示） |
+
+### 5. 排错对照表
+
+| 现象 / 报错 | 根因与处理 |
+| :--- | :--- |
+| `AGY · 未找到 Python 3` | 纯 Windows 模式下未检测到可用的 Python 3（Windows Store 假占位符会被自动跳过）。安装 Python 3 并加入 `PATH`（或启用 `py` 启动器）。 |
+| `AGY · AGY 未运行` | Antigravity 未启动；或 WSL 模式下 `wsl -l -v` 的默认发行版（带 `*`）不是运行 AGY 的发行版（执行 `wsl -s <Distro>`）。 |
+| 纯 Windows 下 `language_server` 已运行但仍报 `AGY 未运行` | 权限不匹配：若 Antigravity 以管理员身份运行，非管理员进程读不到其命令行参数；需以同等权限启动 `start-ring.vbs` 或改用普通权限运行 Antigravity。 |
+| 悬浮球不显示 | 仅在 Antigravity 主窗口可见且未最小化时显示；查看同目录 `ring.log` 获取实时状态。 |
+
+---
+
+## 快速开始（无 Git 方式）
+
+在 **PowerShell**（不要用 `cmd.exe`）中执行：
 
 ```powershell
-# 先进入存放目录（以 D:\tools 为例）
 mkdir D:\tools -Force
 cd D:\tools
-
 Invoke-WebRequest https://github.com/26kyo/agy-quota-context/archive/refs/heads/main.zip -OutFile agy-quota-context.zip
 Expand-Archive agy-quota-context.zip -DestinationPath . -Force
 Rename-Item agy-quota-context-main agy-quota-context
 Remove-Item agy-quota-context.zip
 cd agy-quota-context
-```
-
-### 2. 在项目目录内检查 WSL 与数据抓取
-
-> 确认当前 PowerShell 路径已经在 `...\agy-quota-context>` 内再运行下面命令。
-
-```powershell
-wsl -l -v
-```
-
-确认带 `*` 号的默认 WSL 是你运行 AGY 的发行版（例如 `Ubuntu`，不要是 `docker-desktop`）。如不是，切换一下：
-
-```powershell
-wsl -s Ubuntu
-```
-
-保持 Antigravity 打开，测试数据是否能正常抓到：
-
-```powershell
-wsl -e python3 get_quota.py
-```
-
-看到 `{"ok": true, ...}` 即表示环境正常。
-
-### 3. 启动悬浮球
-
-在当前 PowerShell 窗口运行（或直接双击文件夹里的 `start-ring.vbs`）：
-
-```powershell
 wscript.exe start-ring.vbs
 ```
-
-> 仅当 **Antigravity 主窗口可见且未最小化** 时悬浮球才会显示；最小化或关闭 AGY 时会自动隐藏。
 
 ---
 
@@ -103,13 +139,11 @@ $s.IconLocation = "$PWD\ring.ico"
 $s.Save()
 ```
 
-生成的桌面快捷方式目标为 `wscript.exe`，可直接右键 **固定到任务栏**。
-
 ---
 
 ## 原理与免责声明
 
-`get_quota.py` 扫描本机 `language_server` 进程的 `--csrf_token` 与本地端口，调用 AGY 本地**非公开**接口；仅访问 `127.0.0.1`，不上传任何数据。接口随 AGY 版本更新可能失效。非官方项目。
+`get_quota.py` 扫描本机 `language_server` 进程的 `--csrf_token` 与本地监听端口，显式绕过系统代理直连 `127.0.0.1`，调用 AGY 本地**非公开**接口；不上传任何数据。接口随 AGY 版本更新可能失效。非官方项目。
 
 ## 致谢
 

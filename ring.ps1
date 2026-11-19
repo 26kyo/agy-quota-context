@@ -223,18 +223,94 @@ $pollTimer.add_Tick({
     }
 })
 
+$script:winPython = $null
+$script:winPythonChecked = $false
+$script:lastFetchMode = ""
+
+function Resolve-WindowsPython {
+    if ($script:winPythonChecked) { return $script:winPython }
+    $script:winPythonChecked = $true
+    $candidates = @(
+        @{ Name = "python3"; Prefix = "" },
+        @{ Name = "python";  Prefix = "" },
+        @{ Name = "py";      Prefix = "-3 " }
+    )
+    foreach ($c in $candidates) {
+        $cmd = Get-Command $c.Name -ErrorAction SilentlyContinue
+        if (-not $cmd) { continue }
+        try {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $cmd.Source
+            $psi.Arguments = "$($c.Prefix)--version"
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $p = [System.Diagnostics.Process]::Start($psi)
+            if ($p.WaitForExit(1500)) {
+                $ver = ($p.StandardOutput.ReadToEnd() + $p.StandardError.ReadToEnd()).Trim()
+                if ($p.ExitCode -eq 0 -and $ver -match 'Python 3\.') {
+                    $script:winPython = @{ File = $cmd.Source; Prefix = $c.Prefix }
+                    $p.Dispose()
+                    return $script:winPython
+                }
+            } else {
+                try { $p.Kill() } catch {}
+            }
+            $p.Dispose()
+        } catch {}
+    }
+    return $null
+}
+
 function Start-QuotaFetch {
     if ($null -ne $script:proc) { return }
+    $hasWinLs = $null -ne (Get-Process -Name "language_server*" -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $file = $null
+    $procArgs = $null
+    $mode = ""
+
+    if ($hasWinLs) {
+        $py = Resolve-WindowsPython
+        if (-not $py) {
+            $script:winPythonChecked = $false
+            Update-UI ([PSCustomObject]@{ ok = $false; err = "未找到 Python 3" })
+            return
+        }
+        $mode = "windows"
+        $file = $py.File
+        $procArgs = "$($py.Prefix)`"$(Join-Path $scriptDir 'get_quota.py')`""
+    } else {
+        $wsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+        if (-not $wsl) {
+            Update-UI ([PSCustomObject]@{ ok = $false; err = "AGY 未运行" })
+            return
+        }
+        $mode = "wsl"
+        $file = $wsl.Source
+        $procArgs = "--cd `"$scriptDir`" -e python3 get_quota.py"
+    }
+
+    if ($mode -ne $script:lastFetchMode) {
+        $script:lastFetchMode = $mode
+        "$(Get-Date -Format 'HH:mm:ss') fetch mode=$mode" | Add-Content -Path $logFile -Encoding UTF8
+    }
+
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "wsl.exe"
-    $psi.Arguments = "--cd `"$scriptDir`" -e python3 get_quota.py"
+    $psi.FileName = $file
+    $psi.Arguments = $procArgs
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.RedirectStandardOutput = $true
     $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
 
-    $script:proc = [System.Diagnostics.Process]::Start($psi)
-    $pollTimer.Start()
+    try {
+        $script:proc = [System.Diagnostics.Process]::Start($psi)
+        $pollTimer.Start()
+    } catch {
+        $script:proc = $null
+        Update-UI ([PSCustomObject]@{ ok = $false; err = "启动抓取失败" })
+    }
 }
 
 $wa = [System.Windows.SystemParameters]::WorkArea

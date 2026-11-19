@@ -695,7 +695,7 @@ def render(st: dict, model: str, system_files: list[tuple[str, int]], term_width
 
 
 def load(db_path: Path) -> tuple[list[Step], Msg | None]:
-    uri = "file:" + db_path.as_posix() + "?mode=ro"
+    uri = db_path.resolve().as_uri() + "?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     try:
         rows = conn.execute("SELECT idx, step_type, status, metadata, step_payload FROM steps ORDER BY idx").fetchall()

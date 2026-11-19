@@ -2,9 +2,11 @@
 """Fetch Antigravity local language_server quota and active conversation context as JSON."""
 import glob
 import json
+import os
 import re
 import ssl
 import subprocess
+import sys
 import tempfile
 import urllib.request
 from datetime import datetime
@@ -15,9 +17,75 @@ import context_report
 CATALOG_PATH = Path.home() / ".gemini" / "config" / "plugins" / "desktop-context" / "sidecars" / "context" / ".data" / "model-catalog.json"
 CONV_DIR = Path.home() / ".gemini" / "antigravity" / "conversations"
 ACTIVE_STATE_PATH = Path(tempfile.gettempdir()) / "agy_ring_active.json"
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def find_ls_target():
+def detect_mode():
+    if os.name == "nt":
+        return "windows"
+    try:
+        if "microsoft" in Path("/proc/version").read_text(encoding="utf-8", errors="ignore").lower():
+            return "wsl"
+    except OSError:
+        pass
+    return "linux"
+
+
+def _find_ls_target_windows():
+    ps_cmd = (
+        "Get-CimInstance Win32_Process -Filter \"Name LIKE 'language_server%'\" "
+        "| Select-Object ProcessId, CommandLine | ConvertTo-Json -Compress"
+    )
+    try:
+        raw_out = subprocess.check_output(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stderr=subprocess.DEVNULL,
+            creationflags=NO_WINDOW,
+        ).strip()
+    except OSError:
+        return [], None
+    except subprocess.CalledProcessError:
+        return [], None
+    if not raw_out:
+        return [], None
+
+    try:
+        procs = json.loads(raw_out)
+    except ValueError:
+        return [], None
+    if isinstance(procs, dict):
+        procs = [procs]
+
+    try:
+        net_out = subprocess.check_output(
+            ["netstat", "-ano", "-p", "TCP"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stderr=subprocess.DEVNULL,
+            creationflags=NO_WINDOW,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return [], None
+
+    for p in procs:
+        cmdline = p.get("CommandLine") or ""
+        m = re.search(r"--csrf_token(?:=|\s+)([^\s\"']+)", cmdline)
+        if not m:
+            continue
+        pid = p.get("ProcessId")
+        if not pid:
+            continue
+        ports = re.findall(rf"127\.0\.0\.1:(\d+)\s+\S+\s+LISTENING\s+{pid}\b", net_out)
+        if ports:
+            return ports, m.group(1)
+    return [], None
+
+
+def _find_ls_target_linux():
     for cmd_path in glob.glob("/proc/[0-9]*/cmdline"):
         try:
             raw = open(cmd_path, "rb").read().decode("utf-8", "ignore").split("\0")
@@ -40,7 +108,13 @@ def find_ls_target():
     return [], None
 
 
-def ls_post(ports, token, method, payload, ctx):
+def find_ls_target():
+    if os.name == "nt":
+        return _find_ls_target_windows()
+    return _find_ls_target_linux()
+
+
+def ls_post(ports, token, method, payload, opener):
     body = json.dumps(payload).encode()
     headers = {
         "Content-Type": "application/json",
@@ -55,7 +129,7 @@ def ls_post(ports, token, method, payload, ctx):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, context=ctx, timeout=2) as resp:
+            with opener.open(req, timeout=2) as resp:
                 return json.loads(resp.read().decode())
         except Exception:
             continue
@@ -126,8 +200,8 @@ def pick_conversation(summaries):
     return chosen[2], chosen[3]
 
 
-def get_context_info(ports, token, ctx):
-    traj = ls_post(ports, token, "GetAllCascadeTrajectories", {}, ctx)
+def get_context_info(ports, token, opener):
+    traj = ls_post(ports, token, "GetAllCascadeTrajectories", {}, opener)
     summaries = (traj or {}).get("trajectorySummaries") or {}
     conv_id, title = pick_conversation(summaries)
     if not conv_id:
@@ -153,15 +227,23 @@ def get_context_info(ports, token, ctx):
 
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    mode = detect_mode()
     ports, token = find_ls_target()
     if not ports:
-        print(json.dumps({"ok": False, "err": "AGY 未运行"}))
+        print(json.dumps({"ok": False, "mode": mode, "err": "AGY 未运行"}, ensure_ascii=False))
         return
 
     ctx = ssl._create_unverified_context()
-    summary = ls_post(ports, token, "RetrieveUserQuotaSummary", {}, ctx)
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPSHandler(context=ctx),
+    )
+    summary = ls_post(ports, token, "RetrieveUserQuotaSummary", {}, opener)
     if not summary:
-        print(json.dumps({"ok": False, "err": "连接失败"}))
+        print(json.dumps({"ok": False, "mode": mode, "err": "连接失败"}, ensure_ascii=False))
         return
 
     buckets = {}
@@ -182,6 +264,7 @@ def main():
 
     result = {
         "ok": True,
+        "mode": mode,
         "h": h_pct,
         "hReset": h_reset,
         "w": w_pct,
@@ -190,7 +273,7 @@ def main():
         "aReset": a_reset,
     }
     try:
-        ctx_info = get_context_info(ports, token, ctx)
+        ctx_info = get_context_info(ports, token, opener)
         if ctx_info:
             result.update(ctx_info)
     except Exception:
