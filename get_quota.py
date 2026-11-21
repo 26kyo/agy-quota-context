@@ -85,7 +85,23 @@ def _find_ls_target_windows():
     return [], None
 
 
+def _read_proc_token(pid, cmd_args):
+    for i, arg in enumerate(cmd_args):
+        if arg == "--csrf_token" and i + 1 < len(cmd_args):
+            return cmd_args[i + 1]
+    try:
+        env_raw = open(f"/proc/{pid}/environ", "rb").read().decode("utf-8", "ignore").split("\0")
+    except OSError:
+        return None
+    for item in env_raw:
+        for key in ("ANTIGRAVITY_SERVER_CSRF_TOKEN=", "ANTIGRAVITY_CSRF_TOKEN="):
+            if item.startswith(key):
+                return item[len(key):]
+    return None
+
+
 def _find_ls_target_linux():
+    out = subprocess.check_output(["ss", "-tlnp"], text=True, stderr=subprocess.DEVNULL)
     for cmd_path in glob.glob("/proc/[0-9]*/cmdline"):
         try:
             raw = open(cmd_path, "rb").read().decode("utf-8", "ignore").split("\0")
@@ -93,17 +109,12 @@ def _find_ls_target_linux():
             continue
         if not raw or "language_server" not in raw[0]:
             continue
-        token = None
-        for i, arg in enumerate(raw):
-            if arg == "--csrf_token" and i + 1 < len(raw):
-                token = raw[i + 1]
-                break
-        if not token:
-            continue
         pid = cmd_path.split("/")[2]
-        out = subprocess.check_output(["ss", "-tlnp"], text=True, stderr=subprocess.DEVNULL)
         ports = re.findall(rf"127\.0\.0\.1:(\d+)\b.*pid={pid}\b", out)
-        if ports:
+        if not ports:
+            continue
+        token = _read_proc_token(pid, raw)
+        if token:
             return ports, token
     return [], None
 
